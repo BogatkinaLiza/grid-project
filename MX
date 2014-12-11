@@ -1,0 +1,76 @@
+composite MX {  
+    type
+      Numbers = tuple<float32 number>;
+      Result = tuple<float32 sum, int32 count>;
+      Result2 = tuple<float32 sum, int32 count, float32 mx>;
+      Result3 = tuple<float32 sum, int32 count, float32 mx, float32 dx>;
+    graph
+      stream<Numbers> FileReader = FileSource() 
+      {
+  			param
+  				file: getSubmissionTimeValue("in");
+  				format: csv;
+	   } 
+
+stream <Result> SimpleAggregationResult = Aggregate(FileReader) {
+   window
+    FileReader: tumbling, punct();
+   
+   output
+    SimpleAggregationResult:
+     sum = Sum(number),
+     count = Count();
+}
+
+stream<Result2> CalculatorMX = Functor(SimpleAggregationResult)
+{
+	output
+		CalculatorMX: mx = sum/(float32)count;
+}
+
+stream<Numbers> DelayedFileReader = Delay(FileReader)
+{
+	param
+		delay: 1.0;
+}
+
+stream<Result3> CalculatorDX = Custom(CalculatorMX; DelayedFileReader)
+{
+	logic
+	state:
+	{
+		mutable float32 dx_value = 0;
+		mutable float32 mx_value = 0;
+		mutable int32 count_value = 0;
+		mutable float32 sum_value = 0;
+	}
+	onTuple CalculatorMX:
+	{
+		mx_value = mx;
+		count_value = count;
+		sum_value = sum;
+	}
+	onTuple DelayedFileReader:
+	{
+		dx_value = dx_value + (number - mx_value)*(number - mx_value);
+	}
+	onPunct DelayedFileReader:
+	{
+		if (currentPunct() == Sys.FinalMarker)
+		{
+			dx_value = dx_value / (float32) count_value;
+			submit({sum=sum_value, count=count_value, mx=mx_value, dx=dx_value}, CalculatorDX);
+		}	
+	}
+}
+
+
+() as FileWriter = FileSink(CalculatorDX)     
+{
+	param
+		file: getSubmissionTimeValue("out");
+		append : false ;
+            	quoteStrings : false ;
+}                         
+                          
+}
