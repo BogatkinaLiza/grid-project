@@ -1,0 +1,66 @@
+composite Main
+{
+	type
+		SimpleData = tuple<float64 n, float64 count, float64 sum,
+				float64 sum_sqrt, float64 sum_prev, float64 sum_mult>;
+		StaticData = tuple<float64 mx, float64 dx, float64 rx>;
+	
+	graph
+	stream<float64 number, float64 n> FileReader = FileSource() 
+	{
+		param
+			file: getSubmissionTimeValue("in");
+			format: csv;
+		output
+			FileReader : n = (float64) getSubmissionTimeValue("n");
+	}
+
+	stream<SimpleData> Calculator1 = Custom(FileReader)
+	{
+		logic
+		state:
+		{
+			mutable float64 count = 0;
+			mutable float64 sum = 0;
+			mutable float64 sum_sqrt = 0;
+			mutable float64 previous_number = 0;
+			mutable float64 sum_prev = 0;
+			mutable float64 sum_mult = 0;
+		}
+
+		onTuple FileReader:
+		{
+			count = count + 1.0;
+			sum = sum + number;
+			sum_sqrt = sum_sqrt + number * number;
+			if (count > n)
+			{
+				sum_prev = sum_prev + previous_number;
+				sum_mult = sum_mult + number * previous_number;
+				previous_number = number;
+			}
+			submit({n = n, count = count, sum = sum, sum_sqrt = sum_sqrt, sum_prev = sum_prev, 
+				sum_mult = sum_mult}, Calculator1);
+		}
+	}
+
+	stream<StaticData> Calculator2 = Custom(Calculator1)
+	{
+		logic
+		onTuple Calculator1:
+		{
+			submit({mx = sum / count,
+				dx = (sum_sqrt - sum * sum / count) / count, 
+				rx = sum_mult / (count - n) - sum * sum_prev / (count * (count - n))}, 
+				Calculator2);
+		}
+	}
+
+	() as FileWriter = FileSink(Calculator2)
+	{
+		param
+			file : getSubmissionTimeValue("out");
+			append : false ;
+			quoteStrings : false ;    
+	}
+}
